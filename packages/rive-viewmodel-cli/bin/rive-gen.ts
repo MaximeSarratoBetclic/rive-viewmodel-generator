@@ -4,6 +4,7 @@
  *
  * Usage:
  *   rive-gen --input path/to/file.riv [--output ./generated] [--name myFile]
+ *            [--language dart|typescript] [--rive-import module]
  *            [--modern] [--interface] [--templates path/to/templates]
  */
 
@@ -13,24 +14,34 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { loadRiveWasm, loadRiveFile } from '../src/riveLoader.js';
 import { buildIR } from '../src/irBuilder.js';
-import { generate } from '../src/generator.js';
+import {
+  DEFAULT_RIVE_IMPORT,
+  generate,
+  Language,
+  LANGUAGES,
+} from '../src/generator.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Resolve the templates directory across every run context:
-//   1. Bundled inside the published package (dist/bin -> <pkg>/templates/dart).
+//   1. Bundled inside the published package (dist/bin -> <pkg>/templates/<language>).
 //      `templates/` is copied from the repo's shared assets at build time.
-//   2. Compiled from the repo (dist/bin -> repo-root/assets/templates/dart).
-//   3. Source via tsx (bin -> repo-root/assets/templates/dart).
+//   2. Compiled from the repo (dist/bin -> repo-root/assets/templates/<language>).
+//   3. Source via tsx (bin -> repo-root/assets/templates/<language>).
 // The first candidate that exists on disk wins.
-const TEMPLATE_CANDIDATES = [
-  path.resolve(__dirname, '../../templates/dart'),
-  path.resolve(__dirname, '../../../../assets/templates/dart'),
-  path.resolve(__dirname, '../../assets/templates/dart'),
-];
-const DEFAULT_TEMPLATES_DIR =
-  TEMPLATE_CANDIDATES.find((dir) => fs.existsSync(dir)) ??
-  TEMPLATE_CANDIDATES[0];
+function defaultTemplatesDir(language: Language): string {
+  const folder = LANGUAGES[language].templateFolder;
+  const candidates = [
+    path.resolve(__dirname, '../../templates', folder),
+    path.resolve(__dirname, '../../../../assets/templates', folder),
+    path.resolve(__dirname, '../../../assets/templates', folder),
+  ];
+  return candidates.find((dir) => fs.existsSync(dir)) ?? candidates[0];
+}
+
+function isLanguage(value: string): value is Language {
+  return Object.hasOwn(LANGUAGES, value);
+}
 
 // Read the version from package.json so `--version` always matches the
 // published package. npm always ships package.json at the tarball root, so:
@@ -66,6 +77,16 @@ program
     'Output file base name without extension (defaults to input file name)',
   )
   .option(
+    '--language <language>',
+    `Target language: ${Object.keys(LANGUAGES).join(' | ')}`,
+    'dart',
+  )
+  .option(
+    '--rive-import <module>',
+    'TypeScript only: module exporting UntypedRiveViewModel and the binding params',
+    DEFAULT_RIVE_IMPORT,
+  )
+  .option(
     '--modern',
     "Use modern Rive import 'package:rive/rive.dart' instead of rive_native",
     false,
@@ -73,10 +94,18 @@ program
   .option('--interface', 'Implement the RiveViewModel interface', false)
   .option(
     '--templates <dir>',
-    `Path to Mustache templates directory (default: ${DEFAULT_TEMPLATES_DIR})`,
+    'Path to Mustache templates directory (default: the bundled templates of --language)',
   )
   .action(async (options) => {
     const inputPath = path.resolve(options.input as string);
+    const language = options.language as string;
+
+    if (!isLanguage(language)) {
+      console.error(
+        `Error: unsupported language '${language}' (expected ${Object.keys(LANGUAGES).join(' | ')})`,
+      );
+      process.exit(1);
+    }
 
     if (!fs.existsSync(inputPath)) {
       console.error(`Error: input file not found: ${inputPath}`);
@@ -94,11 +123,18 @@ program
       : path.dirname(inputPath);
     const outputBaseName =
       (options.name as string | undefined) ?? path.basename(inputPath, '.riv');
-    const outputPath = path.join(outputDir, `${outputBaseName}.dart`);
+    const outputPath = path.join(
+      outputDir,
+      `${outputBaseName}${LANGUAGES[language].fileExtension}`,
+    );
 
     const templatesDir = options.templates
       ? path.resolve(options.templates as string)
-      : DEFAULT_TEMPLATES_DIR;
+      : defaultTemplatesDir(language);
+    const onWarning =
+      language === 'typescript'
+        ? (message: string) => console.warn(`Warning: ${message}`)
+        : undefined;
 
     if (!fs.existsSync(templatesDir)) {
       console.error(
@@ -140,7 +176,7 @@ program
     // 3. Build the intermediate representation
     let model;
     try {
-      model = buildIR(riveFile, inputFileName);
+      model = buildIR(riveFile, inputFileName, onWarning);
     } catch (err) {
       console.error('Failed to parse Rive file:', (err as Error).message);
       try { riveFile.unref?.(); } catch { /* ignore */ }
@@ -156,8 +192,11 @@ program
     let code: string;
     try {
       code = generate(model, templatesDir, {
+        language,
         useInterface: options.interface as boolean,
         useModernRive: options.modern as boolean,
+        riveImport: options.riveImport as string,
+        onWarning,
       });
     } catch (err) {
       console.error('Failed to generate code:', (err as Error).message);

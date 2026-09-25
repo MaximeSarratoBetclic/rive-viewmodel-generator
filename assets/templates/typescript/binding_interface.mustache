@@ -1,0 +1,11 @@
+export interface {{bindingInterfaceName}} {
+{{#hasInstance}}
+    instance?: {{instanceTypeName}};
+{{/hasInstance}}
+{{#slots}}
+    {{key}}?: {{instanceTypeName}};
+{{/slots}}
+{{#globals}}
+    {{key}}?: {{instanceTypeName}};
+{{/globals}}
+}

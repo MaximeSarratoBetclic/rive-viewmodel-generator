@@ -1,0 +1,6 @@
+export const {{name}} = {
+{{#values}}
+    {{key}}: {{value}},
+{{/values}}
+} as const;
+export type {{name}} = (typeof {{name}})[keyof typeof {{name}}];

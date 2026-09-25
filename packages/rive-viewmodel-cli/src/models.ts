@@ -60,6 +60,7 @@ export interface ViewModelModel {
   /** The view model's original name in the file (e.g. `Widget`), used with
    * `viewModelByName`. Only meaningful when `instances` is non-empty. */
   runtimeName?: string;
+  isGlobal?: boolean;
 }
 
 export interface StateMachineModel {

@@ -106,7 +106,7 @@ class TemplateGenerator {
   /// instances.
   List<Map<String, dynamic>> _buildInstanceEnums(RiveFileModel model) {
     final result = <Map<String, dynamic>>[];
-    for (final viewModel in model.viewModels) {
+    for (final viewModel in _withNestedViewModels(model.viewModels)) {
       if (viewModel.instances.isEmpty) continue;
       final enumName = _instanceEnumName(viewModel.className);
       result.add({
@@ -125,6 +125,15 @@ class TemplateGenerator {
       });
     }
     return result;
+  }
+
+  Iterable<ViewModelModel> _withNestedViewModels(
+    List<ViewModelModel> viewModels,
+  ) sync* {
+    for (final viewModel in viewModels) {
+      yield viewModel;
+      yield* _withNestedViewModels(viewModel.nestedViewModels);
+    }
   }
 
   List<Map<String, dynamic>> _buildEnums(RiveFileModel model) {
