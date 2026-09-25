@@ -101,6 +101,12 @@ function groupPropertiesIntoLists(allProperties: PropertyModel[]): {
   return { individualProperties, listProperties };
 }
 
+interface TopLevelDefinition {
+  instances: InstanceModel[];
+  runtimeName: string;
+  isGlobal: boolean;
+}
+
 /** The property signature (`name:type`) of a view model instance. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function shapeOf(instance: any): Set<string> {
@@ -163,9 +169,10 @@ function parseViewModelToIR(
   riveFile: any,
   existingClasses: Set<string>,
   generatedClasses: Set<string>,
-  instances: InstanceModel[] = [],
-  runtimeName?: string,
-  shapes: Map<string, Set<string>> = new Map(),
+  definition: TopLevelDefinition | undefined,
+  shapes: Map<string, Set<string>>,
+  topLevelDefinitions: Map<string, TopLevelDefinition>,
+  onWarning: (message: string) => void,
 ): ViewModelModel | null {
   if (!className) return null;
   if (generatedClasses.has(className)) return null;
@@ -232,7 +239,8 @@ function parseViewModelToIR(
           // Prefer a shape match to the real top-level definition (so the
           // nested property reuses e.g. WidgetViewModel and its instance
           // support); fall back to the name-based heuristic otherwise.
-          let nestedClassName = matchNestedClassByShape(nestedInstance, shapes);
+          const shapeMatchedClassName = matchNestedClassByShape(nestedInstance, shapes);
+          let nestedClassName = shapeMatchedClassName;
           if (!nestedClassName) {
             nestedClassName = propertyNameAsClass;
             for (const cls of existingClasses) {
@@ -250,9 +258,12 @@ function parseViewModelToIR(
             riveFile,
             existingClasses,
             generatedClasses,
-            [],
-            undefined,
+            shapeMatchedClassName
+              ? topLevelDefinitions.get(shapeMatchedClassName)
+              : undefined,
             shapes,
+            topLevelDefinitions,
+            onWarning,
           );
           if (nestedModel) nestedViewModels.push(nestedModel);
 
@@ -260,7 +271,9 @@ function parseViewModelToIR(
             name: sanitizedPropName,
             originalName: property.name,
             type: PropertyType.viewModel,
-            metadata: { returnType: nestedClassName },
+            metadata: shapeMatchedClassName
+              ? { returnType: nestedClassName, matchesTopLevel: 'true' }
+              : { returnType: nestedClassName },
           });
         }
         break;
@@ -341,6 +354,9 @@ function parseViewModelToIR(
 
       default:
         // Skip unsupported types (list, listIndex, artboard, none)
+        onWarning(
+          `Skipped ${className}.${property.name}: ${property.type} properties are not supported`,
+        );
         break;
     }
   }
@@ -355,8 +371,9 @@ function parseViewModelToIR(
     listProperties,
     nestedViewModels,
     enums,
-    instances,
-    runtimeName,
+    instances: definition?.instances ?? [],
+    runtimeName: definition?.runtimeName,
+    ...(definition?.isGlobal ? { isGlobal: true } : {}),
   };
 }
 
@@ -380,8 +397,12 @@ function parseInstances(vm: any): InstanceModel[] {
   return instances;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildIR(riveFile: any, fileName: string): RiveFileModel {
+export function buildIR(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  riveFile: any,
+  fileName: string,
+  onWarning?: (message: string) => void,
+): RiveFileModel {
   const fileNameBase = capitalize(toCamelCase(fileName.split('.')[0]));
 
   // --- Artboards ---
@@ -418,6 +439,10 @@ export function buildIR(riveFile: any, fileName: string): RiveFileModel {
   // --- View models ---
   const existingClasses = new Set<string>();
   const shapes = new Map<string, Set<string>>();
+  const topLevelDefinitions = new Map<string, TopLevelDefinition>();
+  const globalViewModelNames = new Set<string>(
+    riveFile.globalViewModelNames?.() ?? [],
+  );
   const vmCount: number = riveFile.viewModelCount();
 
   for (let i = 0; i < vmCount; i++) {
@@ -429,6 +454,11 @@ export function buildIR(riveFile: any, fileName: string): RiveFileModel {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const inst: any = vm.instance?.() ?? vm.defaultInstance?.();
     if (inst) shapes.set(cls, shapeOf(inst));
+    topLevelDefinitions.set(cls, {
+      instances: parseInstances(vm),
+      runtimeName: vm.name as string,
+      isGlobal: globalViewModelNames.has(vm.name as string),
+    });
   }
 
   const viewModels: ViewModelModel[] = [];
@@ -452,9 +482,10 @@ export function buildIR(riveFile: any, fileName: string): RiveFileModel {
       riveFile,
       existingClasses,
       generatedClasses,
-      parseInstances(vm),
-      vm.name as string,
+      topLevelDefinitions.get(className),
       shapes,
+      topLevelDefinitions,
+      onWarning ?? (() => {}),
     );
     if (model) viewModels.push(model);
   }

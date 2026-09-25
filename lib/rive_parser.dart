@@ -140,6 +140,8 @@ class RiveParser {
   /// property back to its top-level definition by shape, since the Rive API
   /// does not expose a nested instance's view-model type name.
   final Map<String, Set<String>> _viewModelShapes = {};
+  final Map<String, ({List<InstanceModel> instances, String runtimeName})>
+  _topLevelDefinitions = {};
 
   RiveParser(this._bytes, this._fileName);
 
@@ -210,6 +212,7 @@ class RiveParser {
     final existingClasses = <String>{};
     final generatedClasses = <String>{};
     _viewModelShapes.clear();
+    _topLevelDefinitions.clear();
     for (var i = 0; i < riveFile.viewModelCount; i++) {
       final viewModel = riveFile.viewModelByIndex(i);
       if (viewModel != null) {
@@ -220,6 +223,10 @@ class RiveParser {
           _viewModelShapes[className] = _shapeOf(instance);
           instance.dispose();
         }
+        _topLevelDefinitions[className] = (
+          instances: _parseInstances(viewModel),
+          runtimeName: viewModel.name,
+        );
       }
     }
 
@@ -369,8 +376,13 @@ class RiveParser {
             // Prefer a shape match to the real top-level definition (so the
             // nested property reuses e.g. WidgetViewModel and its instance
             // support); fall back to the name-based heuristic otherwise.
+            final shapeMatchedClassName = _matchNestedClassByShape(
+              nestedViewModel,
+            );
+            final topLevelDefinition =
+                _topLevelDefinitions[shapeMatchedClassName];
             final nestedClassName =
-                _matchNestedClassByShape(nestedViewModel) ??
+                shapeMatchedClassName ??
                 existingClasses.firstWhere(
                   (className) => propertyNameAsClass.startsWith(
                     className.replaceAll('ViewModel', '').replaceAll('Vm', ''),
@@ -384,6 +396,8 @@ class RiveParser {
               existingClasses,
               generatedClasses,
               parent: className,
+              instances: topLevelDefinition?.instances ?? const [],
+              runtimeName: topLevelDefinition?.runtimeName,
             );
             if (nestedModel != null) {
               nestedViewModels.add(nestedModel);
@@ -394,7 +408,10 @@ class RiveParser {
                 name: sanitizedPropName,
                 originalName: property.name,
                 type: PropertyType.viewModel,
-                metadata: {'returnType': nestedClassName},
+                metadata: {
+                  'returnType': nestedClassName,
+                  if (shapeMatchedClassName != null) 'matchesTopLevel': 'true',
+                },
               ),
             );
           }
