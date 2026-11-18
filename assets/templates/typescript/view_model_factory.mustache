@@ -1,0 +1,14 @@
+{{factoryHead}}
+    return {
+{{#members}}
+{{#isSlot}}
+        get {{name}}(): {{slotInterfaceName}} {
+            return {{slotFactoryName}}(viewModel, {{childPath}});
+        },
+{{/isSlot}}
+{{^isSlot}}
+{{implementation}}
+{{/isSlot}}
+{{/members}}
+    };
+}

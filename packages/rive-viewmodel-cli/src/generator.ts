@@ -17,13 +17,26 @@ import {
   ViewModelModel,
 } from './models.js';
 import { capitalize, toCamelCase, uncapitalize } from './stringUtils.js';
+import { buildTypeScriptContext } from './typescriptContext.js';
 
 // Disable Mustache's HTML escaping — output is Dart source code, not HTML
 Mustache.escape = (text: string) => text;
 
+export const LANGUAGES = {
+  dart: { fileExtension: '.dart', templateFolder: 'dart' },
+  typescript: { fileExtension: '.ts', templateFolder: 'typescript' },
+} as const;
+
+export type Language = keyof typeof LANGUAGES;
+
+export const DEFAULT_RIVE_IMPORT = '@betclicgroup/common/cdk/assets/rive';
+
 export interface GeneratorOptions {
+  language?: Language;
   useInterface?: boolean;
   useModernRive?: boolean;
+  riveImport?: string;
+  onWarning?: (message: string) => void;
 }
 
 function extractIndex(propertyName: string): number {
@@ -72,7 +85,7 @@ function instanceEnumName(className: string): string {
 
 function buildInstanceEnums(model: RiveFileModel): object[] {
   const result: object[] = [];
-  for (const vm of model.viewModels) {
+  for (const vm of collectViewModelsWithNested(model.viewModels)) {
     const instances: InstanceModel[] = vm.instances ?? [];
     if (instances.length === 0) continue;
     const enumName = instanceEnumName(vm.className);
@@ -87,6 +100,15 @@ function buildInstanceEnums(model: RiveFileModel): object[] {
     });
   }
   return result;
+}
+
+function collectViewModelsWithNested(
+  viewModels: ViewModelModel[],
+): ViewModelModel[] {
+  return viewModels.flatMap((vm) => [
+    vm,
+    ...collectViewModelsWithNested(vm.nestedViewModels),
+  ]);
 }
 
 function buildArtboards(model: RiveFileModel): object[] {
@@ -234,22 +256,13 @@ function buildViewModels(
 function loadTemplates(
   templatesDir: string,
 ): { mainTemplate: string; partials: Record<string, string> } {
-  const partialNames = [
-    'enum',
-    'instance_enum',
-    'state_machine_enum',
-    'sealed_artboard_class',
-    'artboard_class',
-    'view_model_class',
-    'artboard_enum',
-  ];
-
   const partials: Record<string, string> = {};
-  for (const name of partialNames) {
-    const filePath = path.join(templatesDir, `${name}.mustache`);
-    if (fs.existsSync(filePath)) {
-      partials[name] = fs.readFileSync(filePath, 'utf-8');
-    }
+  for (const fileName of fs.readdirSync(templatesDir)) {
+    if (!fileName.endsWith('.mustache') || fileName === 'main.mustache') continue;
+    partials[path.basename(fileName, '.mustache')] = fs.readFileSync(
+      path.join(templatesDir, fileName),
+      'utf-8',
+    );
   }
 
   const mainPath = path.join(templatesDir, 'main.mustache');
@@ -265,9 +278,22 @@ export function generate(
   templatesDir: string,
   options: GeneratorOptions = {},
 ): string {
-  const { useInterface = false, useModernRive = false } = options;
-
   const { mainTemplate, partials } = loadTemplates(templatesDir);
+  const context =
+    options.language === 'typescript'
+      ? buildTypeScriptContext(model, {
+          riveImport: options.riveImport ?? DEFAULT_RIVE_IMPORT,
+          onWarning: options.onWarning ?? (() => {}),
+        })
+      : buildDartContext(model, options);
+  return Mustache.render(mainTemplate, context, partials);
+}
+
+function buildDartContext(
+  model: RiveFileModel,
+  options: GeneratorOptions,
+): object {
+  const { useInterface = false, useModernRive = false } = options;
 
   const enums = buildEnums(model);
   const instanceEnums = buildInstanceEnums(model);
@@ -277,7 +303,7 @@ export function generate(
     (vm) => vm.hasImages,
   );
 
-  const context = {
+  return {
     enums,
     instanceEnums,
     artboards,
@@ -287,6 +313,4 @@ export function generate(
     useLegacyRive: !useModernRive,
     useInterface,
   };
-
-  return Mustache.render(mainTemplate, context, partials);
 }

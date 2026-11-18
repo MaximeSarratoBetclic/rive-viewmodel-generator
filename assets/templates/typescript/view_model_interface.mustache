@@ -1,0 +1,16 @@
+export interface {{interfaceName}} {
+{{#members}}
+{{#isValue}}
+    {{methodName}}(value: {{valueType}}): void;
+{{/isValue}}
+{{#isImage}}
+    {{methodName}}(url: string): Observable<void>;
+{{/isImage}}
+{{#isTrigger}}
+    {{methodName}}(): void;
+{{/isTrigger}}
+{{#isSlot}}
+    readonly {{name}}: {{slotInterfaceName}};
+{{/isSlot}}
+{{/members}}
+}

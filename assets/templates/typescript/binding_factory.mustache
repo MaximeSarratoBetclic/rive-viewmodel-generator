@@ -1,0 +1,43 @@
+{{factoryHead}}
+{{#hasSlots}}
+    const nestedInstances: RiveNestedViewModelInstanceParams[] = [];
+{{#slots}}
+    if (binding.{{key}}) {
+        nestedInstances.push({
+            propertyName: {{propertyName}},
+            viewModelName: {{viewModelNameRef}},
+            instanceName: binding.{{key}},
+        });
+    }
+{{/slots}}
+{{/hasSlots}}
+{{#hasSlotsAndGlobals}}
+
+{{/hasSlotsAndGlobals}}
+{{#hasGlobals}}
+    const globalInstances: RiveGlobalViewModelInstanceParams[] = [];
+{{#globals}}
+    if (binding.{{key}}) {
+        globalInstances.push({
+            viewModelName: {{viewModelNameRef}},
+            instanceName: binding.{{key}},
+        });
+    }
+{{/globals}}
+{{/hasGlobals}}
+{{#hasCollections}}
+
+{{/hasCollections}}
+    return {
+        viewModelName: {{viewModelNameRef}},
+{{#hasInstance}}
+        instanceName: binding.instance,
+{{/hasInstance}}
+{{#hasSlots}}
+        nestedInstances,
+{{/hasSlots}}
+{{#hasGlobals}}
+        globalInstances,
+{{/hasGlobals}}
+    };
+}
